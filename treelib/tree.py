@@ -6,12 +6,19 @@
 """
 from __future__ import print_function
 from __future__ import unicode_literals
+import sys
 import json
 from copy import deepcopy
 try:
     from .node import Node
-except:
+except ImportError:
     from node import Node
+try:
+    from StringIO import StringIO as BytesIO
+except ImportError:
+    from io import BytesIO
+
+
 
 __author__ = 'chenxm'
 
@@ -42,7 +49,27 @@ class LinkPastRootNodeError(Exception):
 class InvalidLevelNumber(Exception):
     pass
 
+def python_2_unicode_compatible(klass):
+    """
+    (slightly modified from :
+        http://django.readthedocs.org/en/latest/_modules/django/utils/encoding.html)
 
+    A decorator that defines __unicode__ and __str__ methods under Python 2.
+    Under Python 3 it does nothing.
+
+    To support Python 2 and 3 with a single code base, define a __str__ method
+    returning text and apply this decorator to the class.
+    """
+    if sys.version_info[0] == 2:
+        if '__str__' not in klass.__dict__:
+            raise ValueError("@python_2_unicode_compatible cannot be applied "
+                             "to %s because it doesn't define __str__()." %
+                             klass.__name__)
+        klass.__unicode__ = klass.__str__
+        klass.__str__ = lambda self: self.__unicode__().encode('utf-8')
+    return klass
+
+@python_2_unicode_compatible
 class Tree(object):
     """Tree objects are made of Node(s) stored in _nodes dictionary."""
 
@@ -53,8 +80,13 @@ class Tree(object):
         """Return a list of the nodes'identifiers matching the
         identifier argument.
         """
+<<<<<<< HEAD
         return [nid for nid in self._nodes
                 if nid == identifier]
+=======
+        return [node for node in self._nodes
+                if node == identifier]
+>>>>>>> 6d6c4670ad1f979266a7fbeff20856957b360f31
 
     def __init__(self, tree=None, deep=False):
         """Initiate a new tree or copy another tree with a shallow or
@@ -91,6 +123,82 @@ class Tree(object):
         """Set _nodes[key]"""
         self._nodes.update({key: item})
 
+    def __str__(self):
+        self.reader = ""
+
+        def write(line):
+            self.reader += line.decode('utf-8') + "\n"
+
+        self.__print_backend(func=write)
+        return self.reader
+
+    def __print_backend(self, nid=None, level=ROOT, idhidden=True, filter=None,
+                       key=None, reverse=False, line_type='ascii-ex',
+                       func=print, iflast=[]):
+        """
+        Another implementation of printing tree using Stack
+        Print tree structure in hierarchy style.
+
+        For example:
+            Root
+            |___ C01
+            |    |___ C11
+            |         |___ C111
+            |         |___ C112
+            |___ C02
+            |___ C03
+            |    |___ C31
+
+        A more elegant way to achieve this function using Stack
+        structure, for constructing the Nodes Stack push and pop nodes
+        with additional level info.
+
+        UPDATE: the @key @reverse is present to sort node at each
+        level.
+        """
+        line_types = \
+        {'ascii': ('|', '|-- ', '+-- '),
+         'ascii-ex': ('\u2502', '\u251c\u2500\u2500 ', '\u2514\u2500\u2500 '),
+         'ascii-exr': ('\u2502', '\u251c\u2500\u2500 ', '\u2570\u2500\u2500 '),
+         'ascii-em': ('\u2551', '\u2560\u2550\u2550 ', '\u255a\u2550\u2550 '),
+         'ascii-emv': ('\u2551', '\u255f\u2500\u2500 ', '\u2559\u2500\u2500 '),
+         'ascii-emh': ('\u2502', '\u255e\u2550\u2550 ', '\u2558\u2550\u2550 ')}
+        DT_VLINE, DT_LINE_BOX, DT_LINE_COR = line_types[line_type]
+
+        leading = ''
+        lasting = DT_LINE_BOX
+
+        nid = self.root if (nid is None) else nid
+        if not self.contains(nid):
+            raise NodeIDAbsentError("Node '%s' is not in the tree" % nid)
+
+        label = ('{0}'.format(self[nid].tag))\
+                 if idhidden \
+                    else ('{0}[{1}]'.format(
+                            self[nid].tag,
+                            self[nid].identifier))
+
+        filter = (self.__real_true) if (filter is None) else filter
+
+        if level == self.ROOT:
+            func(label.encode('utf8'))
+        else:
+            leading = ''.join(map(lambda x: DT_VLINE + ' ' * 3
+                                  if not x else ' ' * 4, iflast[0:-1]))
+            lasting = DT_LINE_COR if iflast[-1] else DT_LINE_BOX
+            func('{0}{1}{2}'.format(leading, lasting, label).encode('utf-8'))
+
+        if filter(self[nid]) and self[nid].expanded:
+            queue = [self[i] for i in self[nid].fpointer if filter(self[i])]
+            key = (lambda x: x) if (key is None) else key
+            queue.sort(key=key, reverse=reverse)
+            level += 1
+            for element in queue:
+                iflast.append(queue.index(element) == len(queue)-1)
+                self.__print_backend(element.identifier, level, idhidden,
+                    filter, key, reverse, line_type, func, iflast)
+                iflast.pop()
+
     def __update_bpointer(self, nid, parent_id):
         """set self[nid].bpointer"""
         self[nid].update_bpointer(parent_id)
@@ -101,10 +209,10 @@ class Tree(object):
         else:
             self[nid].update_fpointer(child_id, mode)
 
-    def _real_true(self, p):
+    def __real_true(self, p):
         return True
 
-    def _to_dict(self, nid=None, key=None, reverse=False, with_data=False):
+    def to_dict(self, nid=None, key=None, sort=True, reverse=False, with_data=False):
         """transform self into a dict"""
 
         nid = self.root if (nid is None) else nid
@@ -116,11 +224,12 @@ class Tree(object):
         if self[nid].expanded:
             queue = [self[i] for i in self[nid].fpointer]
             key = (lambda x: x) if (key is None) else key
-            queue.sort(key=key, reverse=reverse)
+            if sort:
+                queue.sort(key=key, reverse=reverse)
 
             for elem in queue:
                 tree_dict[ntag]["children"].append(
-                    self._to_dict(elem.identifier, with_data=with_data))
+                    self.to_dict(elem.identifier, with_data=with_data, sort=sort, reverse=reverse))
             if len(tree_dict[ntag]["children"]) == 0:
                 tree_dict = self[nid].tag if not with_data else \
                             {ntag: {"data":self[nid].data}}
@@ -215,7 +324,7 @@ class Tree(object):
         if not self.contains(nid):
             raise NodeIDAbsentError("Node '%s' is not in the tree" % nid)
 
-        filter = self._real_true if (filter is None) else filter
+        filter = self.__real_true if (filter is None) else filter
         if filter(self[nid]):
             yield nid
             queue = [self[i] for i in self[nid].fpointer if filter(self[i])]
@@ -480,7 +589,7 @@ class Tree(object):
         if not self.contains(nid):
             raise NodeIDAbsentError("Node '%s' is not in the tree" % nid)
 
-        filter = (self._real_true) if (filter is None) else filter
+        filter = (self.__real_true) if (filter is None) else filter
 
         current = nid
         while current is not None:
@@ -492,99 +601,25 @@ class Tree(object):
     def save2file(self, filename, nid=None, level=ROOT, idhidden=True,
                   filter=None, key=None, reverse=False, line_type='ascii-ex'):
         """Update 20/05/13: Save tree into file for offline analysis"""
-        handler = lambda x:\
-        open(filename, 'ab').write(''.join([x,'\n']).encode('utf-8'))
-        self._print_backend(nid,
-                            level,
-                            idhidden,
-                            filter,
-                            key,
-                            reverse,
-                            line_type,
-                            handler)
+        def _write_line(line, f):
+            f.write(line + b'\n')
+
+        handler = lambda x: _write_line(x, open(filename, 'ab'))
+
+        self.__print_backend(nid, level, idhidden, filter,
+            key, reverse, line_type, func=handler)
 
     def show(self, nid=None, level=ROOT, idhidden=True, filter=None,
              key=None, reverse=False, line_type='ascii-ex'):
-        self._print_backend(nid,
-                            level,
-                            idhidden,
-                            filter,
-                            key,
-                            reverse,
-                            line_type,
-                            func=print)
+        self.reader = ""
 
-    def _print_backend(self, nid=None, level=ROOT, idhidden=True, filter=None,
-                       key=None, reverse=False, line_type='ascii-ex',
-                       func=print, iflast=[]):
-        """
-        Another implementation of printing tree using Stack
-        Print tree structure in hierarchy style.
+        def write(line):
+            self.reader += line.decode('utf-8') + "\n"
 
-        For example:
-            Root
-            |___ C01
-            |    |___ C11
-            |         |___ C111
-            |         |___ C112
-            |___ C02
-            |___ C03
-            |    |___ C31
+        self.__print_backend(nid, level, idhidden, filter,
+            key, reverse, line_type, func=write)
 
-        A more elegant way to achieve this function using Stack
-        structure, for constructing the Nodes Stack push and pop nodes
-        with additional level info.
-
-        UPDATE: the @key @reverse is present to sort node at each
-        level.
-        """
-        line_types = \
-        {'ascii': ('|', '|-- ', '+-- '),
-         'ascii-ex': ('\u2502', '\u251c\u2500\u2500 ', '\u2514\u2500\u2500 '),
-         'ascii-exr': ('\u2502', '\u251c\u2500\u2500 ', '\u2570\u2500\u2500 '),
-         'ascii-em': ('\u2551', '\u2560\u2550\u2550 ', '\u255a\u2550\u2550 '),
-         'ascii-emv': ('\u2551', '\u255f\u2500\u2500 ', '\u2559\u2500\u2500 '),
-         'ascii-emh': ('\u2502', '\u255e\u2550\u2550 ', '\u2558\u2550\u2550 ')}
-        DT_VLINE, DT_LINE_BOX, DT_LINE_COR = line_types[line_type]
-
-        leading = ''
-        lasting = DT_LINE_BOX
-
-        nid = self.root if (nid is None) else nid
-        if not self.contains(nid):
-            raise NodeIDAbsentError("Node '%s' is not in the tree" % nid)
-
-        label = ("{0}".format(self[nid].tag)) \
-                 if idhidden else ("{0}[{1}]".format(self[nid].tag,
-                                                     self[nid].identifier))
-
-        filter = (self._real_true) if (filter is None) else filter
-
-        if level == self.ROOT:
-            func(label)
-        else:
-            leading = ''.join(map(lambda x: DT_VLINE + ' ' * 3
-                                  if not x else ' ' * 4, iflast[0:-1]))
-            lasting = DT_LINE_COR if iflast[-1] else DT_LINE_BOX
-            func("{0}{1}{2}".format(leading, lasting, label))
-
-        if filter(self[nid]) and self[nid].expanded:
-            queue = [self[i] for i in self[nid].fpointer if filter(self[i])]
-            key = (lambda x: x) if (key is None) else key
-            queue.sort(key=key, reverse=reverse)
-            level += 1
-            for element in queue:
-                iflast.append(queue.index(element) == len(queue)-1)
-                self._print_backend(element.identifier,
-                          level,
-                          idhidden,
-                          filter,
-                          key,
-                          reverse,
-                          line_type,
-                          func,
-                          iflast)
-                iflast.pop()
+        print(self.reader)
 
     def siblings(self, nid):
         """
@@ -637,9 +672,9 @@ class Tree(object):
             st._nodes.update({self[node_n].identifier: self[node_n]})
         return st
 
-    def to_json(self, with_data=False):
+    def to_json(self, with_data=False, sort=True, reverse=False):
         """Return the json string corresponding to self"""
-        return json.dumps(self._to_dict(with_data=with_data))
+        return json.dumps(self.to_dict(with_data=with_data, sort=sort, reverse=reverse))
 
 if __name__ == '__main__':
     pass
